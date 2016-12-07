@@ -3,27 +3,21 @@
 
     <group android:checkableBehavior="single">
         <item
-            android:id="@+id/nav_camera"
+            android:id="@+id/sort_by_steps"
             android:icon="@mipmap/ic_ranking"
-            android:title="Leaderboards"
-            android:onClick="signOut"/>
+            android:title="steps"
+            />
+        <item
+            android:id="@+id/sort_by_revs"
+            android:icon="@mipmap/ic_ranking"
+            android:title="Bike Revs"
+            />
         <item
             android:id="@+id/nav_sign_out"
             android:icon="@mipmap/ic_today"
-            android:title="Sign Out" />
-    </group>
+            android:title="Sign Out"
+            android:onClick="signOut"/>
 
-    <item android:title="Communicate">
-        <menu>
-            <item
-                android:id="@+id/nav_share"
-                android:icon="@drawable/ic_menu_share"
-                android:title="Share" />
-            <item
-                android:id="@+id/nav_send"
-                android:icon="@drawable/ic_menu_send"
-                android:title="Send" />
-        </menu>
-    </item>
+    </group>
 
 </menu>

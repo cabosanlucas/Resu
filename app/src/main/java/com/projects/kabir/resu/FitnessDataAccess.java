@@ -42,7 +42,6 @@ import static java.text.DateFormat.getTimeInstance;
 
 public class FitnessDataAccess {
 
-    private static final int DONE_REFRESH = 440;
     public GoogleApiClient mFitnessClient;
     public static final String TAG = "Resu_Log";
 
@@ -64,16 +63,15 @@ public class FitnessDataAccess {
 
     /**
      *  Build a {@link GoogleApiClient} that will authenticate the user and allow the application
-     *  to connect to Fitness APIs. The scopes included should match the scopes your app needs
-     *  (see documentation for details). Authentication will occasionally fail intentionally,
-     *  and in those cases, there will be a known resolution, which the OnConnectionFailedListener()
-     *  can address. Examples of this include the user never having signed in before, or
-     *  having multiple accounts on the device and needing to specify which account to use, etc.
+     *  to connect to Fitness APIs. Authentication  occasionally fails for known reasons,
+     *  in those cases, there will be a known resolution, which the OnConnectionFailedListener()
+     *  can address.
      */
     private GoogleApiClient buildFitnessClient() {
 
         // Create the Google API Client
         final GoogleApiClient client = new GoogleApiClient.Builder(mActivity)
+                //Add access to history and reporting
                 .addApi(Fitness.HISTORY_API)
                 .addApi(Fitness.RECORDING_API)
                 .addScope(new Scope(Scopes.FITNESS_ACTIVITY_READ_WRITE))
@@ -81,13 +79,9 @@ public class FitnessDataAccess {
                         new GoogleApiClient.ConnectionCallbacks() {
                             @Override
                             public void onConnected(Bundle bundle) {
-
-                                // Now you can make calls to the Fitness APIs.  What to do?
-                                // Look at some data!!
-                               // new UpdateUserData().execute();
+                                new UpdateUserData().execute();
                                 subscribe();
                             }
-
                             @Override
                             public void onConnectionSuspended(int i) {
                                 // If your connection to the sensor gets lost at some point,
@@ -117,19 +111,16 @@ public class FitnessDataAccess {
         return client;
     }
 
+    //update the user object associated with the currently authenticated user
     public void updateUserData() {
         new UpdateUserData().execute();
 
     }
 
     /**
-     *  Create a {@link DataSet} to insert data into the History API, and
-     *  then create and execute a {@link DataReadRequest} to verify the insertion succeeded.
-     *  By using an {@link AsyncTask}, we can schedule synchronous calls, so that we can query for
-     *  data after confirming that our insert was successful. Using asynchronous calls and callbacks
-     *  would not guarantee that the insertion had concluded before the read request was made.
-     *  An example of an asynchronous call using a callback can be found in the example
-     *  on deleting data below.
+     *  Create and execute a DataReadRequest access data sent from the firebase databse using a
+     *  AsyncTask, so that User Experince is not impacted. Q
+     *  Update the UI after data pull is successful.
      */
 
     public class UpdateUserData extends AsyncTask<Void, Void, User> {
@@ -140,25 +131,20 @@ public class FitnessDataAccess {
             // Begin by creating the query.
             DataReadRequest readRequest = queryFitnessData();
 
-            // [START read_dataset]
             // Invoke the History API to fetch the data with the query and await the result of
             // the read request.
             DataReadResult dataReadResult =
                     Fitness.HistoryApi.readData(mFitnessClient, readRequest).await(1, TimeUnit.MINUTES);
-            // [END read_dataset]
 
+            //access relevant aggregate data
             int totalSteps = getStepCount(dataReadResult);
+            double totalWatts = getTotalPowerUsage(dataReadResult);
 
-         //   double totalWatts = getTotalPowerUsage(dataReadResult);
-
+            //Update the user object
             fitnessUser.updateStepCount(totalSteps);
-           // fitnessUser.updateWattsUsed(totalWatts);
+            fitnessUser.updateWattsUsed(totalWatts);
 
             databaseAccess.pushUser(fitnessUser);
-            //Log.i(TAG, user.toString());
-            // For the sake of the sample, we'll print the data so we can see what we just added.
-            // In general, logging fitness information should be avoided for privacy reasons.
-            //printData(dataReadResult);
             return fitnessUser;
         }
 
@@ -171,11 +157,10 @@ public class FitnessDataAccess {
 
 
     /**
-             * Return a {@link DataReadRequest} for all step count changes in the past week.
-             */
+     * Return a DataReadRequest for all step count changes in the past month.
+     */
     public DataReadRequest queryFitnessData() {
-        // [START build_insert_data_request]
-        // Set a start and end time for our data, using a start time of 1 year before this moment.
+        // Set a start and end time for our data, using a start time of 1 month before this moment.
         Calendar cal = Calendar.getInstance();
         Date now = new Date();
         cal.setTime(now);
@@ -183,18 +168,11 @@ public class FitnessDataAccess {
         cal.add(Calendar.MONTH, -1);
         long startTime = cal.getTimeInMillis();
 
-       // if(ContextCompat.checkSelfPermission(mActivity, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             DataReadRequest readRequest = new DataReadRequest.Builder()
-                    // The data request can specify multiple data types to return, effectively
-                    // combining multiple data queries into one call.
-                    // In this example, it's very unlikely that the request is for several hundred
-                    // datapoints each consisting of a few steps and a timestamp.  The more likely
-                    // scenario is wanting to see how many steps were walked per day, for 7 days.
+                    // get both stepcount and cycling data
                     .aggregate(DataType.TYPE_STEP_COUNT_DELTA, DataType.AGGREGATE_STEP_COUNT_DELTA)
-                    .aggregate(DataType.TYPE_CALORIES_EXPENDED, DataType.AGGREGATE_CALORIES_EXPENDED)
-                    // Analogous to a "Group By" in SQL, defines how data should be aggregated.
-                    // bucketByTime allows for a time span, whereas bucketBySession would allow
-                    // bucketing by "sessions", which would need to be defined in code.
+                    .read(DataType.TYPE_CYCLING_PEDALING_CUMULATIVE)
+                    //store it in daily totals
                     .bucketByTime(1, TimeUnit.DAYS)
                     .setTimeRange(startTime, endTime, TimeUnit.MILLISECONDS)
                     .build();
@@ -203,21 +181,18 @@ public class FitnessDataAccess {
     }
 
     /**
-     * Log a record of the query result. It's possible to get more constrained data sets by
-     * specifying a data source or data type, but for demonstrative purposes here's how one would
-     * dump all the data. In this sample, logging also prints to the device screen, so we can see
-     * what the query returns, but your app should not log fitness information as a privacy
-     * consideration. A better option would be to dump the data you receive to a local data
-     * directory to avoid exposing it to other applications.
+     * Sum total steps over the peroid of the data request
+     * @param dataReadResult the data over the given period
+     * @return the total step count of the given data
      */
     public int getStepCount(DataReadResult dataReadResult) {
-        // [START parse_read_data_result]
-        // If the DataReadRequest object specified aggregated data, dataReadResult will be returned
-        // as buckets containing DataSets, instead of just DataSets.
+        // Since the DataReadRequest object specified aggregated data, data will be returned
+        // as buckets containing DataSets.
         int steps = 0;
         if (dataReadResult.getBuckets().size() > 0) {
             Log.i(TAG, "Number of returned step buckets of DataSets is: "
                     + dataReadResult.getBuckets().size());
+            //Sum the steps
             for (Bucket bucket : dataReadResult.getBuckets()) {
                 List<DataSet> dataSets = bucket.getDataSets();
                 for (DataSet dataSet : dataSets) {
@@ -228,63 +203,27 @@ public class FitnessDataAccess {
             }
         }
         return steps;
-        // [END parse_read_data_result]
     }
-/*
+
     private double getTotalPowerUsage(DataReadResult dataReadResult) {
         double watts = 0;
-        if (dataReadResult.getBuckets().size() > 0) {
-            Log.i(TAG, "Number of returned power buckets of DataSets is: "
-                    + dataReadResult.getBuckets().size());
-            for (Bucket bucket : dataReadResult.getBuckets()) {
-                List<DataSet> dataSets = bucket.getDataSets();
-                for (DataSet dataSet : dataSets) {
-                    for(DataPoint dp: dataSet.getDataPoints()) {
-                        watts += dp.getValue(Field.FIELD_WATTS).asFloat();
-                    }
-                }
-            }
+        DataSet dataSet = dataReadResult.getDataSet(DataType.TYPE_CYCLING_PEDALING_CUMULATIVE);
+        for(DataPoint dp: dataSet.getDataPoints()) {
+            watts += dp.getValue(Field.FIELD_REVOLUTIONS).asInt();
         }
+        Log.d(TAG, "" + watts);
         return watts;
 
     }
-    */
-
-    // [START parse_dataset]
-    private void dumpDataSet(DataSet dataSet) {
-        Log.i(TAG, "Data returned for Data type: " + dataSet.getDataType().getName());
-        DateFormat dateFormat = getTimeInstance();
-
-        Log.i(TAG, "The Number of datapoints is: " + dataSet.getDataPoints().size());
-
-        for (DataPoint dp : dataSet.getDataPoints()) {
-            Log.i(TAG, "Data point:");
-            Log.i(TAG, "\tType: " + dp.getDataType().getName());
-            Log.i(TAG, "\tStart: " + dateFormat.format(dp.getStartTime(TimeUnit.MILLISECONDS)));
-            Log.i(TAG, "\tEnd: " + dateFormat.format(dp.getEndTime(TimeUnit.MILLISECONDS)));
-            for(Field field : dp.getDataType().getFields()) {
-                Log.i(TAG, "\tField: " + field.getName() +
-                        " Value: " + dp.getValue(field));
-                //databaseAccess.pushValue(dp.getValue(field));
-
-            }
-        }
-    }
-    // [END parse_dataset]
 
     /**
-     * Subscribe to an available {@link DataType}. Subscriptions can exist across application
-     * instances (so data is recorded even after the application closes down).  When creating
-     * a new subscription, it may already exist from a previous invocation of this app.  If
-     * the subscription already exists, the method is a no-op.  However, you can check this with
-     * a special success code.
+     * Subscribe to the relevant DataTypes for this application
      */
     public void subscribe() {
-        // To create a subscription, invoke the Recording API. As soon as the subscription is
-        // active, fitness data will start recording.
-        // [START subscribe_to_datatype]
+        //Record step counts
         Fitness.RecordingApi.subscribe(mFitnessClient, DataType.TYPE_STEP_COUNT_CUMULATIVE)
                 .setResultCallback(new ResultCallback<Status>() {
+                    //For debug
                     @Override
                     public void onResult(Status status) {
                         if (status.isSuccess()) {
@@ -299,8 +238,9 @@ public class FitnessDataAccess {
                         }
                     }
                 });
-/*
-        Fitness.RecordingApi.subscribe(mFitnessClient, DataType.AGGREGATE_POWER_SUMMARY)
+
+        //Record pedals
+        Fitness.RecordingApi.subscribe(mFitnessClient, DataType.TYPE_CYCLING_PEDALING_CUMULATIVE)
                 .setResultCallback(new ResultCallback<Status>() {
                     @Override
                     public void onResult(Status status) {
@@ -316,9 +256,6 @@ public class FitnessDataAccess {
                         }
                     }
                 });
-                */
-        // [END subscribe_to_datatype]
-
     }
 }
 
